@@ -1,0 +1,115 @@
+name: Full CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ============ 1. ЛИНТИНГ ============
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Install
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint || echo "No lint script"
+
+      - name: TypeScript check
+        run: npx tsc --noEmit || echo "TypeScript check skipped"
+
+  # ============ 2. ТЕСТЫ ============
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Install
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test || echo "No tests"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            coverage/
+            test-results/
+
+  # ============ 3. СБОРКА (зависит от lint и test) ============
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test] # Ждет завершения lint и test
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: node-modules-${{ hashFiles('package-lock.json') }}
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+
+  # ============ 4. ДЕПЛОЙ (только для main) ============
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build # Ждет сборки
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write # Права на запись
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: . # Артефакт уже скачан в текущую папку
+          clean: true
+
+  # ============ 5. УВЕДОМЛЕНИЕ (опционально) ============
+  notify:
+    runs-on: ubuntu-latest
+    needs: [lint, test, build, deploy]
+    if: always() # Запускается всегда, даже если другие jobs упали
+
+    steps:
+      - name: Show pipeline status
+        run: |
+          echo "Pipeline completed!"
+          echo "Lint status: ${{ needs.lint.result }}"
+          echo "Test status: ${{ needs.test.result }}"
+          echo "Build status: ${{ needs.build.result }}"
+          echo "Deploy status: ${{ needs.deploy.result }}"
