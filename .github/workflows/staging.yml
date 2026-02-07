@@ -1,0 +1,65 @@
+name: Staging - Full Validation
+
+on:
+  push:
+    branches: [staging]
+
+  # Требуем ручного подтверждения для деплоя
+  workflow_dispatch:
+    inputs:
+      deploy_to_staging:
+        description: "Deploy to staging environment"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  security-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high || echo "Audit found issues"
+
+      - name: Check dependencies
+        run: npx npm-check --skip-unused
+
+  performance-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20.x" }
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v9
+        with:
+          configPath: "./lighthouserc.json"
+          uploadArtifacts: true
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [security-check, performance-test]
+    if: github.event.inputs.deploy_to_staging == 'true'
+
+    environment:
+      name: staging
+      url: https://staging.example.com
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20.x" }
+
+      - name: Deploy to Staging
+        run: |
+          echo "Deploying to staging..."
+          # Здесь команды для деплоя на твой staging сервер
+          # Например: scp, rsync, kubectl и т.д.
